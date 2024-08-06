@@ -3,10 +3,13 @@ data/
 go_ml.egg-info/
 go_ml/notebooks/notebook_cache/
 */logs/
+logs/
 /scripts/.ipynb_checkpoints/
 /notebooks/.ipynb_checkpoints/
 build/
 cdhit/
 go_ml/.ipynb_checkpoints/
-*/.ipynb_checkpoints/
+go_ml/notebooks/.ipynb_checkpoints/
+go_ml/__pycache__
+
 
