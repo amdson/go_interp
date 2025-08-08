@@ -12,7 +12,7 @@ import transformers
 parser = ArgumentParser()
 parser = ESMFinetune.add_model_specific_args(parser)
 hparams = parser.parse_args()
-print("got hparams", hparams)
+print("got hparams", hparams, type(hparams))
 
 if __name__ == "__main__":
     train_path = "/home/andrew/cafa5_team/data/"

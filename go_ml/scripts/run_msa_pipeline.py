@@ -121,7 +121,6 @@ for enzyme, enzyme_homologs in homologs.items():
             filter_length(fasta_cd_hit, fasta_len, enzyme)
         else:
             print(f"Skipping filtering for enzyme {enzyme} due to missing seed sequence.")
-        
         i += 1
     except ValueError as e:
         print(f"Error processing enzyme {enzyme}: {e}")
@@ -139,5 +138,4 @@ for fasta_file in os.listdir(fasta_dir):
         output_aligned = os.path.join(msa_dir, f"{os.path.splitext(fasta_file)[0]}_aligned.fasta")
         run_muscle(fasta_path, output_aligned)
         print(f"Alignment done for {fasta_file}")
-
 print("Finished obtaining MSAs")

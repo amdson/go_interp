@@ -58,3 +58,26 @@ def mask_avg(bert_mask, bert_eval):
     gather_ind = torch.tile(eval_idx[:, 1:2], (1, bert_eval.shape[-1]))
     eval_avg = eval_avg.scatter_reduce(0, gather_ind, eval_samples, 'mean', include_self=False)
     return eval_avg, eval_support
+
+from esm.models.esmc import ESMC
+from esm.sdk.api import ESMProtein, LogitsConfig
+from esm.utils.constants.esm3 import (
+    SEQUENCE_MASK_TOKEN,
+)
+import torch
+def get_logits_esmc(seq, model, batch_size=8, mask_func=mask_indiv):
+    seq_ind = model.encode(ESMProtein(sequence=seq)).sequence
+    batch, batch_inds, mut_inds = mask_func(seq_ind, SEQUENCE_MASK_TOKEN)
+    bert_eval_l = []
+    with torch.no_grad():
+        for si in range(0, batch.shape[0], batch_size):
+            ei = min(batch.shape[0], si+batch_size)
+            x = batch[si:ei, :]
+            model_eval = model(x)
+            bert_eval = model_eval.sequence_logits
+            bert_eval_l.append(bert_eval.cpu())
+    bert_eval = torch.cat(bert_eval_l)
+    bert_eval = torch.softmax(bert_eval, dim=2)
+    bert_mask = (batch == SEQUENCE_MASK_TOKEN).cpu()
+    eval_avg, eval_support = mask_avg(bert_mask, bert_eval)
+    return eval_avg.float().numpy()

@@ -5,7 +5,7 @@ from torch.utils.data import DataLoader
 import numpy as np
 import pandas as pd
 import json, pickle
-from go_bench.load_tools import load_protein_sequences
+# from go_bench.load_tools import load_protein_sequences
 from go_ml.data_utils import BertSeqDataset, get_seq_collator
 import transformers
 from Bio import SeqIO
@@ -58,6 +58,19 @@ def enzyme_iterator(enzyme_df, tokenizer):
           inputs = tokenizer.batch_encode_plus([seq], add_special_tokens=True, padding='max_length',
                                              truncation=True, return_attention_mask=True, max_length=1024)
           yield {'prot_id': pid, 'annot_ind': annot_ind, 'go_ind': go_ind, 'seq': seq, 'seq_ind': inputs['input_ids'], 'mask': inputs['attention_mask']}
+
+from Bio import SeqIO
+from gzip import open as gzopen
+def load_protein_sequences(seq_path):
+    if( seq_path.endswith('.gz')):
+        with gzopen(seq_path, 'rt') as f:
+            sequences = list(SeqIO.parse(f, 'fasta'))
+    else:
+        with open(seq_path, 'r') as f:
+            sequences = list(SeqIO.parse(f))
+    seq_id = [seq.id for seq in sequences]
+    seq = [str(seq.seq).upper() for seq in sequences]
+    return seq, seq_id
 
 def get_dataloaders(model_name="facebook/esm2_t6_8M_UR50D", max_length=1024):
     train_path = "/home/andrew/cafa5_team/data/"

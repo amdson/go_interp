@@ -8,8 +8,9 @@ from Bio.Seq import Seq
 from Bio.SeqRecord import SeqRecord
 from scipy.sparse import csr_matrix, csc_matrix, dok_matrix, lil_matrix
 from torch.utils import data
-from transformers import BertTokenizer
+from transformers import BertTokenizer, AutoTokenizer
 from go_bench.load_tools import load_GO_tsv_file, load_protein_sequences, convert_to_sparse_matrix
+from torch.nn.utils.rnn import pad_sequence
 
 def stable_hash(text:str):
   hash=0
@@ -36,6 +37,64 @@ def read_sparse(fn, prot_rows, GO_cols):
         if(prot in prm and go_id in tcm):
             sparse_probs[prm[prot], tcm[go_id]] = prob
     return csr_matrix(sparse_probs)
+
+
+esm_tokenizer = AutoTokenizer.from_pretrained("facebook/esm2_t6_8M_UR50D", do_lower_case=False)
+class ProtFuncDataset(data.Dataset):
+    def __init__(self, prot_ids, sequences, labels, tokenizer=None):
+        self.prot_ids = prot_ids
+        self.sequences = sequences  # A list of strings representing proteins
+        self.labels = labels
+        self.tokenizer = tokenizer if tokenizer else esm_tokenizer
+        # seq_tensors = []
+        # seq_mask = []
+        # for seq in sequences:
+        #     inputs = esm_tokenizer(seq, add_special_tokens=True, padding='longest', truncation=True, max_length=1024, return_tensors='pt')
+        #     seq_tensors.append(inputs['input_ids'][0])
+        #     seq_mask.append(inputs['attention_mask'][0])
+        tokenized_dataset = self.tokenizer.batch_encode_plus(
+            sequences,
+            add_special_tokens=True,
+            padding='longest',
+            truncation=True,
+            max_length=1024,
+            return_tensors='pt'
+        )
+        self.seq_tensors = tokenized_dataset['input_ids']
+        self.seq_mask = tokenized_dataset['attention_mask']
+
+    def __len__(self):
+        return len(self.prot_ids)
+    def __getitem__(self, index):
+        return {
+            "prot_id": self.prot_ids[index],
+            "seq": self.sequences[index],
+            "seq_tensor": self.seq_tensors[index],
+            "seq_mask": self.seq_mask[index],
+            "labels": torch.squeeze(torch.from_numpy(self.labels[index, :].toarray()), 0),
+            "seq_len": len(self.sequences[index])
+        }
+    
+def prot_func_collate(batch, pad_token=1):
+    prot_ids = [item['prot_id'] for item in batch]
+    seq_tensors = torch.stack([item['seq_tensor'] for item in batch])
+    seq_masks = torch.stack([item['seq_mask'] for item in batch])
+    labels = torch.stack([item['labels'] for item in batch])
+    seq_len = [item['seq_len'] for item in batch]
+    max_len = max(seq_len)
+    
+    # # Pad sequences to the same length
+    # padded_sequences = pad_sequence([torch.tensor(list(seq)) for seq in seq_tensors], batch_first=True, padding_value=pad_token)
+    # padded_mask = pad_sequence([torch.tensor(list(mask)) for mask in seq_masks], batch_first=True, padding_value=False)
+    padded_sequences = seq_tensors[:, :max_len+2] # +2 for special tokens
+    padded_mask = seq_masks[:, :max_len+2] 
+
+    return {
+        'prot_id': prot_ids,
+        'seq_ind': padded_sequences,
+        'mask': padded_mask,
+        'labels': labels
+    }
 
 class ProtDataset(data.Dataset):
     def __init__(self, prot_ids, sequences, prot_data=None):

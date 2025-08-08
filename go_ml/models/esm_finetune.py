@@ -19,7 +19,6 @@ from torch.optim.lr_scheduler import (
 from transformers import get_linear_schedule_with_warmup, get_cosine_schedule_with_warmup
 from go_ml.train_utils import CosineAnnealingWarmupRestarts
 from transformers import DataCollatorWithPadding
-from torchmetrics.classification import MultilabelF1Score
 
 import pandas as pd
 import os
@@ -29,18 +28,9 @@ import logging as log
 import numpy as np
 
 class ESMFinetune(pl.LightningModule):
-    """
-    # https://github.com/minimalist-nlp/lightning-text-classification.git
-    
-    Sample model to show how to use BERT to classify sentences.
-    
-    :param hparams: ArgumentParser containing the hyperparameters.
-    hparams: {
-        nr_frozen_epochs,
-        batch_size,
-        num_classes,
-        gradient_checkpointing,
-    }
+    """ 
+    ESMFinetune is a PyTorch Lightning module for fine-tuning the ESM model on protein sequences.
+    :param hparams: ArgumentParser containing the model hyperparameters.
     """
     def __init__(self, model_args) -> None:
         super(ESMFinetune, self).__init__()
