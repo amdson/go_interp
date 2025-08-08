@@ -14,6 +14,7 @@ go_ml/notebooks/notebook_cache/
 go_ml/notebooks/.ipynb_checkpoints/
 # Ignore checkpoint files
 *.ipynb_checkpoints
+*/__pycache__/
 
 go_ml/msa_benchmark/uniref_msa/
 go_ml/msa_benchmark/uniref_data/
@@ -23,9 +24,17 @@ go_ml/msa_benchmark/query_db/
 go_ml/msa_benchmark/results_db/
 go_ml/msa_benchmark/tmp/
 
+go_ml/model_notebooks/*.pkl
+
+go_ml/scripts/msa_old/
+go_ml/scripts/old_scripts/
+
+
 go_ml/notebooks/interp_old/
 go_ml/scripts/old_scripts/
 
+go_ml/dataset_eval/dataset_eval_old/
+go_ml/dataset_eval/eval_files/
 
 
 
