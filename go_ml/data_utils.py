@@ -38,10 +38,24 @@ def read_sparse(fn, prot_rows, GO_cols):
             sparse_probs[prm[prot], tcm[go_id]] = prob
     return csr_matrix(sparse_probs)
 
+def gen_annot_mat(annot_col, seq_len, max_len=850):
+    annot_mat = np.zeros((len(annot_col), max_len), dtype=bool)
+    for i, annot in enumerate(annot_col):
+        # print(annot)
+        for chunk in annot:
+            if isinstance(chunk, tuple):
+                start, end = chunk
+                start, end = int(start), int(end)
+                annot_mat[i, start:end+1] = 1.0
+            else:
+                s = int(chunk)
+                if(s <= seq_len[i]):
+                    annot_mat[i, s] = 1.0
+    return annot_mat
 
 esm_tokenizer = AutoTokenizer.from_pretrained("facebook/esm2_t6_8M_UR50D", do_lower_case=False)
 class ProtFuncDataset(data.Dataset):
-    def __init__(self, prot_ids, sequences, labels, tokenizer=None):
+    def __init__(self, prot_ids, sequences, labels, tokenizer=None, data=None, tokenize=True):
         self.prot_ids = prot_ids
         self.sequences = sequences  # A list of strings representing proteins
         self.labels = labels
@@ -52,29 +66,58 @@ class ProtFuncDataset(data.Dataset):
         #     inputs = esm_tokenizer(seq, add_special_tokens=True, padding='longest', truncation=True, max_length=1024, return_tensors='pt')
         #     seq_tensors.append(inputs['input_ids'][0])
         #     seq_mask.append(inputs['attention_mask'][0])
-        tokenized_dataset = self.tokenizer.batch_encode_plus(
-            sequences,
-            add_special_tokens=True,
-            padding='longest',
-            truncation=True,
-            max_length=1024,
-            return_tensors='pt'
-        )
-        self.seq_tensors = tokenized_dataset['input_ids']
-        self.seq_mask = tokenized_dataset['attention_mask']
+        self.tokenized = tokenize
+        if(tokenize):
+            tokenized_dataset = self.tokenizer.batch_encode_plus(
+                sequences,
+                add_special_tokens=True,
+                padding='longest',
+                truncation=True,
+                max_length=1024,
+                return_tensors='pt'
+            )
+            self.seq_tensors = tokenized_dataset['input_ids']
+            self.seq_mask = tokenized_dataset['attention_mask']
+        self.data = data if data is not None else [{} for _ in range(len(prot_ids))]
 
     def __len__(self):
         return len(self.prot_ids)
     def __getitem__(self, index):
-        return {
+        if(not self.tokenized):
+            #throw error
+            raise ValueError("Dataset not tokenized. Set tokenize=True in constructor.")
+        d = self.data[index]
+        d.update({
             "prot_id": self.prot_ids[index],
             "seq": self.sequences[index],
             "seq_tensor": self.seq_tensors[index],
             "seq_mask": self.seq_mask[index],
             "labels": torch.squeeze(torch.from_numpy(self.labels[index, :].toarray()), 0),
             "seq_len": len(self.sequences[index])
-        }
+        })
+        return d
+    @classmethod
+    def from_annot_df(cls, annot_df, go_terms, tokenizer=None):
+        go_term_map = {term: i for i, term in enumerate(go_terms)}
+        labels = np.zeros((len(annot_df), len(go_terms)), dtype=int)
+        for i, (_, row) in enumerate(annot_df.iterrows()):
+            term_ind = [go_term_map[term] for term in row['GOTerm'] if term in go_term_map]
+            labels[i, term_ind] = 1
+        labels = csr_matrix(labels)
+        sequences = annot_df['Sequence'].tolist()
+        prot_ids = annot_df['UniprotID'].tolist()
+        annot_mat = torch.from_numpy(gen_annot_mat(annot_df['AnnotatedIndices'], 
+                                                   [len(s) for s in annot_df['Sequence']]))
+        assert len(prot_ids) == labels.shape[0] == len(sequences) == annot_mat.shape[0]
+        return cls(prot_ids, sequences, labels, tokenizer=tokenizer, 
+                   data=[{"GOTerm": row['GOTerm'], "annot_mask": annot_mat[i]} for i, (_, row) in enumerate(annot_df.iterrows())])
     
+def dict_to_device(d, device):
+    for k, v in d.items():
+        if(type(v) is torch.Tensor):
+            d[k] = v.to(device)
+    return d
+
 def prot_func_collate(batch, pad_token=1):
     prot_ids = [item['prot_id'] for item in batch]
     seq_tensors = torch.stack([item['seq_tensor'] for item in batch])
@@ -82,6 +125,15 @@ def prot_func_collate(batch, pad_token=1):
     labels = torch.stack([item['labels'] for item in batch])
     seq_len = [item['seq_len'] for item in batch]
     max_len = max(seq_len)
+
+    d = {}
+    for key in batch[0].keys():
+        if key in ['prot_id', 'seq_tensor', 'seq_mask', 'labels', 'seq_len']:
+            continue
+        elif type(batch[0][key]) is torch.Tensor:
+            d[key] = torch.stack([item[key] for item in batch])
+        else:
+            d[key] = [item[key] for item in batch]
     
     # # Pad sequences to the same length
     # padded_sequences = pad_sequence([torch.tensor(list(seq)) for seq in seq_tensors], batch_first=True, padding_value=pad_token)
@@ -89,12 +141,144 @@ def prot_func_collate(batch, pad_token=1):
     padded_sequences = seq_tensors[:, :max_len+2] # +2 for special tokens
     padded_mask = seq_masks[:, :max_len+2] 
 
-    return {
+    d.update({
         'prot_id': prot_ids,
         'seq_ind': padded_sequences,
         'mask': padded_mask,
         'labels': labels
-    }
+    })
+    return d
+
+mask_token_id = esm_tokenizer.convert_tokens_to_ids('<mask>')
+aa_tokens = torch.arange(4, 24)
+def bert_mask(seq_ind, attention_mask, mask_token_id, rand_token_id, mask_prob=0.15):
+    masked_seq_ind = seq_ind.clone()
+    labels = seq_ind.clone()
+    special_tokens_mask = ~(attention_mask.bool())
+    special_tokens_mask[:, 0] = 1  # [CLS]
+
+    probability_matrix = torch.rand(*seq_ind.shape)
+    probability_matrix[special_tokens_mask] = 1
+    probability_matrix[attention_mask == 0] = 1
+
+    # print(probability_matrix)
+
+    masked_indices = probability_matrix < mask_prob
+    labels[~masked_indices] = -100  # We only compute loss on masked tokens
+    labels[special_tokens_mask] = -100  # Do not compute loss on special tokens
+
+    # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
+    indices_replaced = (torch.rand(*labels.shape) < 0.8) & masked_indices
+    masked_seq_ind[indices_replaced] = mask_token_id
+
+    # 10% of the time, we replace masked input tokens with random word
+    indices_random = (torch.rand(*labels.shape) < 0.5) & masked_indices & ~indices_replaced
+    random_words = torch.randint(0, len(rand_token_id), (indices_random.sum(),), dtype=torch.long)
+    random_words = rand_token_id[random_words]
+    masked_seq_ind[indices_random] = random_words
+    return masked_seq_ind, labels
+
+
+
+def bert_span_mask(seq_ind, attention_mask, mask_token_id, rand_token_id, mask_prob=0.15):
+    masked_seq_ind = seq_ind.clone()
+    labels = seq_ind.clone()
+    special_tokens_mask = ~(attention_mask.bool())
+    special_tokens_mask[:, 0] = 1  # [CLS]
+    seq_len = attention_mask.sum(dim=1) - 2
+
+    res_ind = torch.arange(seq_ind.shape[1]).unsqueeze(0).repeat(seq_ind.shape[0], 1)
+    span_center = torch.rand(seq_ind.shape[0]) * seq_len.float()
+    span_center = span_center.long() + 1
+    span_center = span_center.unsqueeze(1)
+    span_dist = torch.abs(res_ind - span_center)
+    span_mask = (span_dist <= 55)
+
+    kernel_size = 4
+    probability_matrix = torch.rand(*seq_ind.shape)
+    probability_matrix = (probability_matrix <= mask_prob / kernel_size).float()
+    kernel = torch.ones((1, 1, kernel_size)) / kernel_size
+    # padding = kernel_size // 2
+    probability_matrix = probability_matrix.unsqueeze(1)  # add channel dimension
+    probability_matrix = torch.nn.functional.conv1d(probability_matrix, kernel, padding='same')
+    probability_matrix = (~(probability_matrix > 0)).float() # invert so that prob of masking is mask_prob
+    probability_matrix = probability_matrix.squeeze(1)  # remove channel dimension
+
+    probability_matrix[~span_mask] = 0 #Mask all outside span
+    probability_matrix[special_tokens_mask] = 1 # Do not mask special tokens
+    masked_indices = probability_matrix < mask_prob
+
+    labels[~masked_indices] = -100  # We only compute loss on masked tokens
+    labels[~span_mask] = -100  # We only compute loss on masked tokens inside major span
+    labels[special_tokens_mask] = -100  # Do not compute loss on special tokens
+    # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
+    indices_replaced = masked_indices
+    masked_seq_ind[indices_replaced] = mask_token_id
+    # # 10% of the time, we replace masked input tokens with random word
+    # indices_random = (torch.rand(*labels.shape) < 0.5) & masked_indices & ~indices_replaced
+    # random_words = torch.randint(0, len(rand_token_id), (indices_random.sum(),), dtype=torch.long)
+    # random_words = rand_token_id[random_words]
+    # masked_seq_ind[indices_random] = random_words
+    return masked_seq_ind, labels
+
+bert_mask_alias = lambda seq_ind, attention_mask: bert_mask(seq_ind, attention_mask, mask_token_id, aa_tokens, mask_prob=0.15)
+bert_span_mask_alias = lambda seq_ind, attention_mask: bert_span_mask(seq_ind, attention_mask, mask_token_id, aa_tokens, mask_prob=0.35)
+
+#Inherit from ProtFuncDataset
+class BertFuncDataset(ProtFuncDataset):
+    def __init__(self, prot_ids, sequences, labels, tokenizer=None, 
+                 data=None, tokenize=True, mask_func=bert_mask):
+        if(tokenizer is None):
+            tokenizer = esm_tokenizer
+        super().__init__(prot_ids, sequences, labels, tokenizer=tokenizer, data=data, tokenize=tokenize)
+        self.mask_func = mask_func
+
+    @classmethod
+    def from_prot_func_dataset(cls, prot_func_dataset, mask_func=bert_mask_alias):
+        assert prot_func_dataset.tokenized, "Input ProtFuncDataset must be tokenized."
+        bert_func_dataset = cls(prot_func_dataset.prot_ids, prot_func_dataset.sequences, 
+                                prot_func_dataset.labels, tokenizer=prot_func_dataset.tokenizer, 
+                                data=prot_func_dataset.data, tokenize=False, mask_func=mask_func)
+        bert_func_dataset.seq_tensors = prot_func_dataset.seq_tensors
+        bert_func_dataset.seq_mask = prot_func_dataset.seq_mask
+        bert_func_dataset.tokenized = True
+        return bert_func_dataset
+
+    def __getitem__(self, index):
+        d = self.data[index]
+        d.update({
+            "prot_id": self.prot_ids[index],
+            "seq": self.sequences[index],
+            "seq_tensor": self.seq_tensors[index],
+            "seq_mask": self.seq_mask[index],
+            "labels": torch.squeeze(torch.from_numpy(self.labels[index, :].toarray()), 0),
+            "seq_len": len(self.sequences[index])
+        })
+        seq_ind = d['seq_tensor']
+        attention_mask = d['seq_mask']
+        masked_seq_ind, masked_seq_labels = self.mask_func(seq_ind.reshape(1, -1), attention_mask.reshape(1, -1))
+        d['masked_seq_tensor'] = masked_seq_ind[0]
+        d['masked_seq_labels'] = masked_seq_labels[0]
+        return d
+    
+def truncated_stack(tensor_list, max_len): 
+    stack = torch.stack(tensor_list)
+    return stack[:, :max_len+2]
+
+def prot_func_collate_bert(batch, pad_token=1):
+    seq_len = [item['seq_len'] for item in batch]
+    max_len = max(seq_len)
+
+    d = {}
+    for key in batch[0].keys():
+        if key in ['seq_tensor', 'seq_mask', 'masked_seq_tensor', 'masked_seq_labels']:
+            d[key] = truncated_stack([item[key] for item in batch], max_len)
+        elif key == 'labels':
+            d[key] = torch.stack([item[key] for item in batch])
+        else:
+            d[key] = [item[key] for item in batch]
+    return d
+
 
 class ProtDataset(data.Dataset):
     def __init__(self, prot_ids, sequences, prot_data=None):

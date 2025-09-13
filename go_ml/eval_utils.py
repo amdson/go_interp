@@ -72,39 +72,15 @@ def get_bert_entropy(bert_mat, seq_len_mask):
     entropy[~seq_len_mask.astype(bool)] = 3.0
     return entropy
 
-#PSSM dict pid: pssm matrix
-#Importance matrix: seq importance values
-# def gen_annot_mat(annot_col, seq_len, max_len=850):
-#     annot_mat = np.zeros((len(annot_col), max_len), dtype=bool)
-#     for i, annot in enumerate(annot_col):
-#         chunks = annot.split(',')
-#         # print(annot)
-#         for chunk in chunks:
-#             # print(chunk)
-#             chunk = chunk.replace('[', '').replace(']', '').replace('(', '').replace(')', '')
-#             if '-' in chunk:
-#                 start, end = map(int, chunk.split('-'))
-#                 annot_mat[i, start:end+1] = 1.0
-#             else:
-#                 s = int(chunk)
-#                 if(s <= seq_len[i]):
-#                     annot_mat[i, s] = 1.0
-#     return annot_mat
+def gen_logit_map(prot_id_l, logit_map, max_len=850):
+    score_mat = np.zeros((len(prot_id_l), max_len, logit_map[prot_id_l[0]].shape[-1]), dtype=np.float32)
+    for i, prot_id in enumerate(prot_id_l):
+        if prot_id in logit_map:
+            prot_scores = logit_map[prot_id]
+            score_mat[i, :prot_scores.shape[0], :] = prot_scores
+    return score_mat
 
-def gen_annot_mat(annot_col, seq_len, max_len=850):
-    annot_mat = np.zeros((len(annot_col), max_len), dtype=bool)
-    for i, annot in enumerate(annot_col):
-        # print(annot)
-        for chunk in annot:
-            if isinstance(chunk, tuple):
-                start, end = chunk
-                start, end = int(start), int(end)
-                annot_mat[i, start:end+1] = 1.0
-            else:
-                s = int(chunk)
-                if(s <= seq_len[i]):
-                    annot_mat[i, s] = 1.0
-    return annot_mat
+from go_ml.data_utils import gen_annot_mat
 
 def gen_seq_len_mask(sequences, max_len=850):
     mask_mat = np.zeros((len(sequences), max_len), dtype=bool)
@@ -117,9 +93,12 @@ def filter_annot_df(annot_df, max_seq_len=850):
     annot_df = annot_df.dropna()
     annot_df = annot_df[annot_df['Sequence'].str.len() <= max_seq_len]
     annot_df['AnnotatedIndices'] = annot_df['AnnotatedIndices'].apply(ast.literal_eval)
+    annot_df['GOTerm'] = annot_df['GOTerm'].apply(ast.literal_eval)
     annot_mat = gen_annot_mat(annot_df['AnnotatedIndices'], [len(s) for s in annot_df['Sequence']])
-    has_annot = annot_mat.sum(axis=1) > 0
-    annot_df = annot_df[has_annot]
+    seq_len_mask = gen_seq_len_mask(annot_df['Sequence'], max_len=max_seq_len)
+    has_annot = (annot_mat*seq_len_mask).sum(axis=1) > 0
+    annot_full = annot_mat.sum(axis=1) >= 0.75*annot_df['Sequence'].str.len()
+    annot_df = annot_df[has_annot & ~annot_full]
     return annot_df
 
 def auc_score(token_attribution, token_attribution_mask, conserved_token_mat):
@@ -133,14 +112,23 @@ def auc_score(token_attribution, token_attribution_mask, conserved_token_mat):
     # fpr_l = np.array(fpr_l); tpr_l = np.array(tpr_l); 
     auc_l = np.array(auc_l)
     return auc_l.mean()
-    
+
+from sklearn.metrics import f1_score, precision_recall_fscore_support
+def bulk_auc(token_attribution, token_attribution_mask, conserved_token_mat):
+    mask = token_attribution_mask.flatten()
+    labels = conserved_token_mat.flatten()[mask]
+    preds = (token_attribution.flatten())[mask]
+    fpr, tpr, thresholds = roc_curve(labels, preds)
+    roc_auc = auc(fpr, tpr)
+    return roc_auc
+
 def top_30_score(token_attribution, token_attribution_mask, conserved_token_mat):
     attribution_argsort = np.argsort(token_attribution - 1e5*(~token_attribution_mask), axis=1)[:, ::-1]
     top_conserve_stat = conserved_token_mat[np.arange(0, conserved_token_mat.shape[0]).reshape((-1, 1)), attribution_argsort]
     annot_counts = conserved_token_mat.sum(axis=1, keepdims=False)
     row_norm = np.minimum(30, annot_counts).astype(float)
     conserve_counts = top_conserve_stat[:, :30].sum(axis=1).astype(float)
-    print(row_norm.shape, conserve_counts.shape)
+    # print(row_norm.shape, conserve_counts.shape)
     conserve_counts /= row_norm
     return conserve_counts.mean()
 
@@ -233,6 +221,9 @@ def mean_auc(token_attribution: np.ndarray, token_attribution_mask: np.ndarray, 
         p_attribution = token_attribution[r, token_attribution_mask[r]]
         fpr, tpr, thresholds = roc_curve(p_labels, p_attribution)
         roc_auc = auc(fpr, tpr)
+        if(np.isnan(roc_auc)):
+            print(f"Warning: NaN AUC for row {r}. Skipping.")
+            continue
         fpr_l.append(fpr)
         tpr_l.append(tpr)
         auc_l.append(roc_auc)

@@ -67,46 +67,46 @@ def load_protein_sequences(seq_path):
             sequences = list(SeqIO.parse(f, 'fasta'))
     else:
         with open(seq_path, 'r') as f:
-            sequences = list(SeqIO.parse(f))
+            sequences = list(SeqIO.parse(f, 'fasta'))
     seq_id = [seq.id for seq in sequences]
     seq = [str(seq.seq).upper() for seq in sequences]
     return seq, seq_id
 
-def get_dataloaders(model_name="facebook/esm2_t6_8M_UR50D", max_length=1024):
-    train_path = "/home/andrew/cafa5_team/data/"
-    with open(f"{train_path}/cafa_dataset/go_terms.json", "r") as f:
-        go_terms = json.load(f)
-    with open(f"{train_path}/cafa_dataset/prot_ids.json", "r") as f:
-        prot_ids = json.load(f)
-    with open(f"{train_path}/cafa_dataset/rev_annot.pkl", "rb") as f:
-        labels = pickle.load(f)
-    print((np.asarray(labels.sum(axis=1)) > 0).sum() / labels.shape[0])
-    prot_sequences, seq_ids = load_protein_sequences(f"{train_path}/uniprot_sprot.fasta")
+# def get_dataloaders(model_name="facebook/esm2_t6_8M_UR50D", max_length=1024):
+#     train_path = "/home/andrew/cafa5_team/data/"
+#     with open(f"{train_path}/cafa_dataset/go_terms.json", "r") as f:
+#         go_terms = json.load(f)
+#     with open(f"{train_path}/cafa_dataset/prot_ids.json", "r") as f:
+#         prot_ids = json.load(f)
+#     with open(f"{train_path}/cafa_dataset/rev_annot.pkl", "rb") as f:
+#         labels = pickle.load(f)
+#     print((np.asarray(labels.sum(axis=1)) > 0).sum() / labels.shape[0])
+#     prot_sequences, seq_ids = load_protein_sequences(f"{train_path}/uniprot_sprot.fasta")
 
-    assert all(s1 == s2 for s1, s2 in zip(prot_ids, seq_ids))
-    labeled_id = (np.asarray(labels.sum(axis=1)) > 0).flatten()
+#     assert all(s1 == s2 for s1, s2 in zip(prot_ids, seq_ids))
+#     labeled_id = (np.asarray(labels.sum(axis=1)) > 0).flatten()
     
-    gen = np.random.default_rng(seed=42)
-    ind = gen.permuted(np.arange(len(prot_ids))[labeled_id])
-    train_len = ind.shape[0] * 4 // 5
-    train_ind = ind[:train_len]
-    val_ind = ind[train_len:]
-    np.sort(train_ind); np.sort(val_ind)
-    train_ids = [prot_ids[i] for i in train_ind]; train_sequences = [prot_sequences[i] for i in train_ind]
-    val_ids = [prot_ids[i] for i in val_ind]; val_sequences = [prot_sequences[i] for i in val_ind]
-    train_labels = labels[train_ind, :]; val_labels = labels[val_ind, :]
-    train_dataset = BertSeqDataset(train_ids, go_terms, train_sequences, train_labels)
-    val_dataset = BertSeqDataset(val_ids, go_terms, val_sequences, val_labels)
-    print(f"train len {len(train_dataset)} val len {len(val_dataset)}")
+#     gen = np.random.default_rng(seed=42)
+#     ind = gen.permuted(np.arange(len(prot_ids))[labeled_id])
+#     train_len = ind.shape[0] * 4 // 5
+#     train_ind = ind[:train_len]
+#     val_ind = ind[train_len:]
+#     np.sort(train_ind); np.sort(val_ind)
+#     train_ids = [prot_ids[i] for i in train_ind]; train_sequences = [prot_sequences[i] for i in train_ind]
+#     val_ids = [prot_ids[i] for i in val_ind]; val_sequences = [prot_sequences[i] for i in val_ind]
+#     train_labels = labels[train_ind, :]; val_labels = labels[val_ind, :]
+#     train_dataset = BertSeqDataset(train_ids, go_terms, train_sequences, train_labels)
+#     val_dataset = BertSeqDataset(val_ids, go_terms, val_sequences, val_labels)
+#     print(f"train len {len(train_dataset)} val len {len(val_dataset)}")
 
-    tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
-    collate_seqs = get_seq_collator(tokenizer, max_length=max_length, add_special_tokens=True)
-    dataloader_params = {"shuffle": True, "batch_size": 8, "collate_fn":collate_seqs}
-    val_dataloader_params = {"shuffle": False, "batch_size": 24, "collate_fn":collate_seqs}
+#     tokenizer = transformers.AutoTokenizer.from_pretrained(model_name)
+#     collate_seqs = get_seq_collator(tokenizer, max_length=max_length, add_special_tokens=True)
+#     dataloader_params = {"shuffle": True, "batch_size": 8, "collate_fn":collate_seqs}
+#     val_dataloader_params = {"shuffle": False, "batch_size": 24, "collate_fn":collate_seqs}
 
-    train_loader = DataLoader(train_dataset, **dataloader_params, num_workers=6)
-    val_loader = DataLoader(val_dataset, **val_dataloader_params)
-    return train_loader, val_loader
+#     train_loader = DataLoader(train_dataset, **dataloader_params, num_workers=6)
+#     val_loader = DataLoader(val_dataset, **val_dataloader_params)
+#     return train_loader, val_loader
 
 class CosineAnnealingWarmupRestarts(_LRScheduler):
     """
@@ -196,22 +196,26 @@ class CosineAnnealingWarmupRestarts(_LRScheduler):
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
             param_group['lr'] = lr
 
-def bert_mask(seq_batch, sequence_mask_token, base_tokens, mut_per=0.15):
-    batch_size, seq_len = seq_batch.shape
-    device = seq_batch.device
-    # seq_len = torch.LongTensor([seq_len - 2]) #Discount SOS and EOS tokens at start and end
-    seq_len -= 2
-    mut_count = int(seq_len*mut_per)
-    mut_inds = torch.stack([torch.randperm(seq_len) for _ in range(batch_size)])[:, :mut_count] + 1
-    batch_inds = torch.tile(torch.arange(0, mut_inds.shape[0]).reshape((-1, 1)), (1, mut_count))
-    mut_inds, batch_inds = mut_inds.to(device), batch_inds.to(device)
-    update_batch = seq_batch.clone()
-    replacement_tokens = seq_batch[batch_inds, mut_inds]
-    mask_token_mask = torch.rand((replacement_tokens.shape)) > 0.2
-    replacement_tokens[mask_token_mask] = sequence_mask_token
-    mut_token_mask = mask_token_mask & (torch.rand((replacement_tokens.shape)) > 0.5)
-    mut_index = torch.randint(0, base_tokens.shape[0], (mut_token_mask.sum(),))
-    mut_tokens = base_tokens[mut_index]
-    replacement_tokens[mut_token_mask] = mut_tokens
-    update_batch[batch_inds, mut_inds] = replacement_tokens
-    return update_batch
+# def bert_mask(seq_batch, sequence_mask_token, base_tokens, mut_per=0.15):
+#     batch_size, seq_len = seq_batch.shape
+#     device = seq_batch.device
+#     # seq_len = torch.LongTensor([seq_len - 2]) #Discount SOS and EOS tokens at start and end
+#     seq_len -= 2
+#     mut_count = int(seq_len*mut_per)
+#     mut_inds = torch.stack([torch.randperm(seq_len) for _ in range(batch_size)])[:, :mut_count] + 1
+#     batch_inds = torch.tile(torch.arange(0, mut_inds.shape[0]).reshape((-1, 1)), (1, mut_count))
+#     mut_inds, batch_inds = mut_inds.to(device), batch_inds.to(device)
+#     update_batch = seq_batch.clone()
+#     replacement_tokens = seq_batch[batch_inds, mut_inds]
+#     mask_token_mask = torch.rand((replacement_tokens.shape)) > 0.2
+#     replacement_tokens[mask_token_mask] = sequence_mask_token
+#     mut_token_mask = mask_token_mask & (torch.rand((replacement_tokens.shape)) > 0.5)
+#     mut_index = torch.randint(0, base_tokens.shape[0], (mut_token_mask.sum(),))
+#     mut_tokens = base_tokens[mut_index]
+#     replacement_tokens[mut_token_mask] = mut_tokens
+#     update_batch[batch_inds, mut_inds] = replacement_tokens
+#     return update_batch
+
+
+
+
