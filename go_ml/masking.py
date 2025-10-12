@@ -126,6 +126,15 @@ def get_logits_esmc(seq, model, batch_size=8, mask_func=mask_indiv):
     eval_avg, eval_support = mask_avg(bert_mask, bert_eval)
     return eval_avg#.numpy()
 
+def get_logits_esmc_instant(seq, model):
+    seq_ind = model.encode(ESMProtein(sequence=seq)).sequence
+    x = seq_ind.unsqueeze(0).to(model.device)
+    with torch.no_grad():
+        model_eval = model(x)
+        bert_eval = model_eval.sequence_logits
+    bert_eval = torch.softmax(bert_eval, dim=2)
+    return bert_eval.squeeze(0).cpu()
+
 
 def get_logits_esmfast(seq, model, tokenizer, batch_size=8, mask_func=mask_indiv):
     # tokenizer = model.tokenizer

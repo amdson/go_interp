@@ -15,7 +15,7 @@ go_ml/notebooks/.ipynb_checkpoints/
 # Ignore checkpoint files
 *.ipynb_checkpoints
 */__pycache__/
-
+alt_models/
 go_ml/msa_benchmark/uniref_msa/
 go_ml/msa_benchmark/uniref_data/
 # Ignore anything not a python or ipynb file in the msa_benchmark directory
@@ -35,9 +35,6 @@ go_ml/scripts/old_scripts/
 
 go_ml/dataset_eval/dataset_eval_old/
 go_ml/dataset_eval/eval_files/
-
-
-
 
 go_ml/logs/
 output.png

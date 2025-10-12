@@ -87,6 +87,16 @@ class ESMFinetune(pl.LightningModule):
         output_vector = torch.cat(output_vectors, 1)
         return output_vector
     
+    def interp_forward(self, input_ids):
+        attention_mask = (input_ids != self.tokenizer.pad_token_id).long()
+        word_embeddings = self.model(input_ids.long(),
+                                           attention_mask)[0]
+        pooling = self.pool_strategy({"token_embeddings": word_embeddings,
+                                      "cls_token_embeddings": word_embeddings[:, 0],
+                                      "attention_mask": attention_mask,
+                                      }, pool_cls=False, pool_mean=True)
+        return self.classification_head(pooling)
+    
     def forward(self, input_ids, attention_mask):
         word_embeddings = self.model(input_ids,
                                            attention_mask)[0]

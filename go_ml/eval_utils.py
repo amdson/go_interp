@@ -146,12 +146,17 @@ def mean_reciprocal_rank(token_attribution, token_attribution_mask, conserved_to
     return ttr / tct
 
 def mean_reciprocal_rank_mat(token_attribution, token_attribution_mask, conserved_token_mat):
-    attribution_argsort = np.argsort(token_attribution - 1e5*token_attribution_mask, axis=1)[::-1]
+    attribution_argsort = np.argsort(token_attribution - 1e5*(~token_attribution_mask), axis=1)[:, ::-1]
     attribution_ranks = np.argsort(attribution_argsort, axis=1)
+
+    # print(token_attribution)
+    # print(attribution_argsort)
+    # print(attribution_ranks)
+
     ttr = 0
     tct = 0
     for i in range(conserved_token_mat.shape[0]):
-        token_ranks = attribution_ranks[i, conserved_token_mat[i]]
+        token_ranks = attribution_ranks[i][conserved_token_mat[i]]
         if(token_ranks.shape[0] <= 0):
             continue
         ttr += 1 / (token_ranks.min()+1)
@@ -229,7 +234,7 @@ def mean_auc(token_attribution: np.ndarray, token_attribution_mask: np.ndarray, 
         auc_l.append(roc_auc)
     auc_l = np.array(auc_l)
     if return_roc:
-        return auc_l.mean(), fpr_l, tpr_l
+        return auc_l.mean(), (fpr_l, tpr_l, auc_l)
     return auc_l.mean()
 
 def roc_average(fpr_l, tpr_l):

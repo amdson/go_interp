@@ -24,6 +24,7 @@ def run_muscle_dir(fasta_dir = "uniref_msa/csa_msa/", msa_dir = "uniref_msa/csa_
             print(f"Alignment done for {fasta_file}")
     print("Finished obtaining MSAs")
 
-run_muscle_dir('uniref_msa/csa_msa/', 'uniref_msa/csa_msa_output/')
-run_muscle_dir('uniref_msa/elms_msa/', 'uniref_msa/elms_msa_output/')
-run_muscle_dir('uniref_msa/llps_msa/', 'uniref_msa/llps_msa_output/')
+# run_muscle_dir('uniref_msa/csa_msa/', 'uniref_msa/csa_msa_output/')
+# run_muscle_dir('uniref_msa/elms_msa/', 'uniref_msa/elms_msa_output/')
+# run_muscle_dir('uniref_msa/llps_msa/', 'uniref_msa/llps_msa_output/')
+run_muscle_dir('uniref_msa/ip_domain_msa/', 'uniref_msa/ip_domain_msa_output/')

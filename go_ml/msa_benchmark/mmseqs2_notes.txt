@@ -24,3 +24,6 @@ mmseqs convertalis query_db/csa_db uniref_data/uniref_db results_db/csa_result_d
 mmseqs convertalis query_db/llps_db uniref_data/uniref_db_gpu results_db/llps_result_db llps_aln.m8 --format-output "query,target,fident,pident,nident,qlen,tlen,qstart,qend,tstart,tend,evalue,bits,qseq,tseq"
 mmseqs convertalis query_db/elms_db uniref_data/uniref_db_gpu results_db/elms_result_db elms_aln.m8 --format-output "query,target,fident,pident,nident,qlen,tlen,qstart,qend,tstart,tend,evalue,bits,qseq,tseq"
 
+mmseqs search query_db/ip_domain_db uniref_data/uniref_db results_db/csa_result_db tmp --gpu 1 --num-iterations 2
+
+mmseqs search csa_db sprot_db_gpu resultDB tmp --gpu 1 --num-iterations 2
