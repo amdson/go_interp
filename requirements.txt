@@ -1,0 +1,44 @@
+# Function-Conditioned Protein Language Models
+# Core dependencies only. Install with: pip install -r requirements.txt
+# Tested with Python 3.11, CUDA 12.6.
+
+# ── Deep learning ─────────────────────────────────────────────────────────────
+torch>=2.5
+pytorch-lightning>=2.5
+torchmetrics>=1.0
+tensorboard>=2.0
+
+# ── Protein language models ───────────────────────────────────────────────────
+esm==3.2.1                  # ESM Cambrian (ESMC)
+transformers>=4.40          # ESM2 tokenizer
+safetensors
+
+# ── Local packages ────────────────────────────────────────────────────────────
+-e git+https://github.com/amdson/go_bench.git@950aa81290436eea4d14ab0abbf11d6c8b0b79e2#egg=go_bench
+-e .                        # go_ml (this package)
+
+# ── GO term utilities ─────────────────────────────────────────────────────────
+goatools>=1.4
+
+# ── Bioinformatics ────────────────────────────────────────────────────────────
+biopython>=1.80
+
+# ── Data science ──────────────────────────────────────────────────────────────
+numpy>=1.24
+pandas>=2.0
+scipy>=1.10
+scikit-learn>=1.3
+statsmodels>=0.14
+
+# ── Visualization ─────────────────────────────────────────────────────────────
+matplotlib>=3.7
+seaborn>=0.13
+
+# ── Utilities ─────────────────────────────────────────────────────────────────
+tqdm
+regex
+requests
+
+# ── Jupyter (for running notebooks) ──────────────────────────────────────────
+jupyterlab>=4.0
+ipywidgets
